@@ -21,6 +21,7 @@ cd linux-${LINUX_VERSION} || exit
 
 # 复制配置文件
 cp ../config .config
+cp ../debian-uefi-certs.pem certs/
 
 # 禁用 DEBUG_INFO 以加速构建
 #从内核 5.18+ 开始，还需要启用DEBUG_INFO_NONE
@@ -29,10 +30,13 @@ scripts/config --undefine GDB_SCRIPTS
 scripts/config --undefine DEBUG_INFO_SPLIT
 scripts/config --undefine DEBUG_INFO_REDUCED
 scripts/config --undefine DEBUG_INFO_COMPRESSED
-scripts/config --enable  DEBUG_INFO_NONE
-scripts/config --disable  DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT
-scripts/config --disable  DEBUG_INFO_DWARF4
-scripts/config --disable  DEBUG_INFO_DWARF5
+scripts/config --enable DEBUG_INFO_NONE
+scripts/config --disable DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT
+scripts/config --disable DEBUG_INFO_DWARF4
+scripts/config --disable DEBUG_INFO_DWARF5
+# 其他
+scripts/config --set-val CONFIG_BUILD_SALT ${LINUX_VERSION}-amd64
+scripts/config --set-val CONFIG_SYSTEM_TRUSTED_KEYS ${PWD}/certs/debian-uefi-certs.pem
 
 # 应用 patch.d/ 目录下的脚本，用于自定义对系统源码的修改
 source ../patch.d/*.sh
