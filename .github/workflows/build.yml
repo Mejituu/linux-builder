@@ -1,11 +1,17 @@
 name: Build linux kernel deb package
 on: push
 
+env:
+  UPLOAD_DIR: true
+  UPLOAD_RELEASE: false
+  # UPLOAD_WETRANSFER: false
+  TZ: Asia/Shanghai
+
 jobs:
   build:
     name: Build kernel
     runs-on: ubuntu-latest
-    container: debian:testing
+    container: docker.io/debian:testing
     steps:
       # # 由于默认的 Ubuntu 环境只有 17G 左右的剩余空间，所以我们需要先利用如下 action 对编译环境进行扩容
       # - name: Maximize build space
@@ -18,14 +24,142 @@ jobs:
       #     remove-android: 'true'
 
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
-      - name: Build
-        run: bash build_action.sh
+      # 初始化环境
+      - name: Initialization environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sed -i~orig -e 's/# deb-src/deb-src/' /etc/apt/sources.list
+          # echo "deb-src http://deb.debian.org/debian bullseye main" >> /etc/apt/sources.list
+          apt -qq update
+          apt -qq full-upgrade -y
+          apt -qq install curl wget git time python3 -y
+          apt -qq install xz-utils rsync build-essential bc kmod cpio flex libncurses5-dev libelf-dev libssl-dev dwarves bison -y
+          apt -qq build-dep linux -y
+          apt -qq autoremove --purge
+          apt -qq clean
+          cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 
-      # 将编译后的产物保留，以供直接通过网页下载
-      - name: Artifact
-        uses: actions/upload-artifact@v2
+      # 检查更新
+      - name: Check for updates
+        id: check
+        run: |
+          configVersion=$(grep 'Kernel Configuration' < config | awk '{print $3}')
+          linuxVersion=$(curl -s https://www.kernel.org/ | grep ' <a href="https://cdn.kernel.org/pub/linux/kernel/' | head -n 1 | awk -F '[>]' '{print $2}' | awk -F '[<]' '{print $1}')
+          echo "configVersion=" $configVersion
+          echo "linuxVersion=" $linuxVersion
+          if [[ $configVersion == *"$linuxVersion"* ]]; then
+              echo "::set-output name=status::fail"
+          else
+              echo "::set-output name=status::success"
+          fi
+          echo "linuxVersion=${configVersion}" >> $GITHUB_ENV
+
+      # 获取源码
+      - name: Get source code
+        id: code
+        if: steps.check.outputs.status == 'success'
+        run: |
+          df -hT $PWD
+          wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${linuxVersion}.tar.xz -O - | tar xJ
+          echo "::set-output name=status::success"
+
+      # - name: SSH connection to Actions
+      #   uses: B4gol/ssh2actions@main
+      #   if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh  != 'false') || contains(github.event.action, 'ssh')
+      #   env:
+      #     TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      #     TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+
+      # 配置
+      - name: Configuration
+        id: code
+        if: steps.code.outputs.status == 'success'
+        run: |
+          cd linux-${linuxVersion} || exit
+          # 复制配置文件
+          cp ../config .config
+          # 禁用 DEBUG_INFO 以加速构建
+          #从内核 5.18+ 开始 还需要启用DEBUG_INFO_NONE
+          scripts/config --disable DEBUG_INFO
+          scripts/config --undefine GDB_SCRIPTS
+          scripts/config --undefine DEBUG_INFO_SPLIT
+          scripts/config --undefine DEBUG_INFO_REDUCED
+          scripts/config --undefine DEBUG_INFO_COMPRESSED
+          scripts/config --enable  DEBUG_INFO_NONE
+          scripts/config --disable  DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT
+          scripts/config --disable  DEBUG_INFO_DWARF4
+          scripts/config --disable  DEBUG_INFO_DWARF5
+          # 应用 patch.d/ 目录下的脚本，用于自定义对系统源码的修改
+          source ../patch.d/*.sh
+          echo "::set-output name=status::success"
+
+      # 编译内核
+      - name: Compile the kernel
+        id: compile
+        if: steps.config.outputs.status == 'success'
+        run: |
+          cd linux-${linuxVersion} || exit
+          echo -e "$(nproc) thread compile"
+          # 获取系统的 CPU 核心数 将核心数X2设置为编译时开启的进程数 以加快编译速度
+          CPU_CORES=$(($(grep -c processor < /proc/cpuinfo)*2))
+          time fakeroot make -j${CPU_CORES} bindeb-pkg LOCALVERSION=-mejituu KDEB_PKGVERSION=$(make kernelversion)-1 ARCH=x86_64
+          # 将 deb 包移动到 mejituu 目录
+          cd ..
+          rm -rf linux-${linuxVersion}
+          mkdir mejituu
+          mv *.deb mejituu/
+          echo "::set-output name=status::success"
+          echo "FILE_DATE=Debian_Kernel_${linuxVersion}_mejituu_$(date +"%Y/%m/%d-%H:%M")" >> $GITHUB_ENV
+
+      # 检查空间使用情况
+      - name: Check space usage
+        if: (!cancelled()) && steps.compile.outputs.status == 'success'
+        run: df -hT
+
+      # 上传
+      - name: Upload
+        uses: actions/upload-artifact@main
+        if: steps.compile.outputs.status == 'success' && env.UPLOAD_DIR == 'true'
         with:
-          name: Mejituu
+          name: ${{ env.FILE_DATE }}
           path: ${{ github.workspace }}/mejituu/
+
+      # # 上传到 WeTransfer
+      # - name: Upload to WeTransfer
+      #   id: wetransfer
+      #   if: steps.compile.outputs.status == 'success' && env.UPLOAD_WETRANSFER == 'true' && !cancelled()
+      #   run: |
+      #     curl -fsSL git.io/file-transfer | sh
+      #     ./transfer wet -s -p 16 --no-progress ${GITHUB_WORKSPACE}/mejituu/ 2>&1 | tee wetransfer.log
+      #     echo "::warning file=wetransfer.com::$(cat wetransfer.log | grep https)"
+      #     echo "::set-output name=url::$(cat wetransfer.log | grep https | cut -f3 -d" ")"
+
+      # 生成发布标签
+      - name: Generate release tag
+        id: tag
+        if: env.UPLOAD_RELEASE == 'true' && steps.compile.outputs.status == 'success' && !cancelled()
+        run: |
+          echo "::set-output name=releaseTag::${FILE_DATE}"
+          touch release.txt
+          echo "::set-output name=status::success"
+
+      # 上传内核发布
+      - name: Upload kernel to release
+        uses: softprops/action-gh-release@v1
+        if: steps.tag.outputs.status == 'success' && !cancelled()
+        env:
+          GITHUB_TOKEN: ${{ secrets.TOKEN }}
+        with:
+          tag_name: ${{ steps.tag.outputs.releaseTag }}
+          body_path: release.txt
+          files: ${{ github.workspace }}/mejituu/*
+
+      # 删除工作流程运行
+      - name: Delete workflow runs
+        uses: GitRML/delete-workflow-runs@main
+        with:
+          retain_days: 1
+          keep_minimum_runs: 10
