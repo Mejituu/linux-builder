@@ -33,8 +33,8 @@ jobs:
         run: |
           # sed -i "/deb-src/s/# //g" /etc/apt/sources.list
           # echo "deb-src http://deb.debian.org/debian bullseye main" >> /etc/apt/sources.list
-          cp /etc/apt/sources.list /etc/apt/sources.list.d/sources-src.list
-          sed -i 's|deb http|deb-src http|g' /etc/apt/sources.list.d/sources-src.list
+          cp /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list.d/debian-src.sources
+          sed -i 's|Types: deb|Types: deb-src|g' /etc/apt/sources.list.d/debian-src.sources
           apt -qq update
           apt -qq full-upgrade -y
           apt -qq install curl wget git time python3 -y
