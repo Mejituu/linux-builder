@@ -28,6 +28,7 @@ jobs:
 
       # 初始化环境
       - name: Initialization environment
+        shell: bash
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
@@ -47,6 +48,7 @@ jobs:
       # 检查更新
       - name: Check for updates
         id: check
+        shell: bash
         run: |
           configVersion=$(grep 'Kernel Configuration' < config | awk '{print $3}')
           linuxVersion=$(curl -s https://www.kernel.org/ | grep ' <a href="https://cdn.kernel.org/pub/linux/kernel/' | head -n 1 | awk -F '[>]' '{print $2}' | awk -F '[<]' '{print $1}')
@@ -63,6 +65,7 @@ jobs:
       - name: Get source code
         id: code
         if: steps.check.outputs.status == 'success'
+        shell: bash
         run: |
           df -hT $PWD
           wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${linuxVersion}.tar.xz -O - | tar xJ
@@ -79,6 +82,7 @@ jobs:
       - name: Configuration
         id: config
         if: steps.code.outputs.status == 'success'
+        shell: bash
         run: |
           cd linux-${linuxVersion} || exit
           # 复制配置文件
@@ -102,6 +106,7 @@ jobs:
       - name: Compile the kernel
         id: compile
         if: steps.config.outputs.status == 'success'
+        shell: bash
         run: |
           cd linux-${linuxVersion} || exit
           echo -e "$(nproc) thread compile"
@@ -119,6 +124,7 @@ jobs:
       # 检查空间使用情况
       - name: Check space usage
         if: (!cancelled()) && steps.compile.outputs.status == 'success'
+        shell: bash
         run: df -hT
 
       # 上传
@@ -133,6 +139,7 @@ jobs:
       # - name: Upload to WeTransfer
       #   id: wetransfer
       #   if: steps.compile.outputs.status == 'success' && env.UPLOAD_WETRANSFER == 'true' && !cancelled()
+      #   shell: bash
       #   run: |
       #     curl -fsSL git.io/file-transfer | sh
       #     ./transfer wet -s -p 16 --no-progress ${GITHUB_WORKSPACE}/mejituu/ 2>&1 | tee wetransfer.log
@@ -143,6 +150,7 @@ jobs:
       - name: Generate release tag
         id: tag
         if: env.UPLOAD_RELEASE == 'true' && steps.compile.outputs.status == 'success' && !cancelled()
+        shell: bash
         run: |
           echo "::set-output name=releaseTag::${FILE_DATE}"
           touch release.txt
