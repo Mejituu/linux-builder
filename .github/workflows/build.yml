@@ -75,7 +75,7 @@ jobs:
 
       # 配置
       - name: Configuration
-        id: code
+        id: config
         if: steps.code.outputs.status == 'success'
         run: |
           cd linux-${linuxVersion} || exit
