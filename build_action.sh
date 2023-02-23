@@ -16,7 +16,7 @@ apt build-dep -y linux
 cd ${GITHUB_WORKSPACE} || exit
 
 # 下载内核源码
-wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${LINUX_VERSION}.tar.xz -O - | tar xJ
+wget -q https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${LINUX_VERSION}.tar.xz -O - | tar xJ
 cd linux-${LINUX_VERSION} || exit
 
 # 复制配置文件
@@ -45,10 +45,10 @@ source ../patch.d/*.sh
 # 获取系统的 CPU 核心数，将核心数X2设置为编译时开启的进程数，以加快编译速度
 CPU_CORES=$(($(grep -c processor < /proc/cpuinfo)*2))
 #make deb-pkg -j${CPU_CORES}
-fakeroot make -j${CPU_CORES} bindeb-pkg LOCALVERSION=-mejituu KDEB_PKGVERSION=$(make kernelversion)-1 ARCH=x86_64
+fakeroot make -j${CPU_CORES} bindeb-pkg LOCALVERSION=-mejituu KDEB_PKGVERSION=$(make kernelversion)-1 ARCH=x86_64 1>/dev/null
 
 # 将 deb 包移动到 mejituu 目录
 cd ..
 rm -rf linux-${LINUX_VERSION}
-mkdir mejituu
-mv ./*.deb mejituu/
+mkdir mejituu && chown -R $USER:$GROUPS mejituu && chgrp -R $USER:$GROUPS mejituu && chmod -R 777 mejituu || exit
+mv *.deb mejituu/
